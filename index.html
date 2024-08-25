@@ -1,221 +1,290 @@
-<p>
-  This example shows you the contents of the selected part of your display.
-  Click the Start Capture button to begin.
-</p>
-
-<p>
-  <button id="start">Start Capture</button>&nbsp;<button id="stop">
-    Stop Capture
-  </button>
-</p>
-
-<video id="video" autoplay playsinline></video>
-<br />
-
-<strong>Log:</strong>
-<br />
-<pre id="log"></pre>
-
-<script>
-  const videoElem = document.getElementById("video");
-  const logElem = document.getElementById("log");
-  const startElem = document.getElementById("start");
-  const stopElem = document.getElementById("stop");
-
-  let localStream;
-  let peerConnection;
-  const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-
-  const displayMediaOptions = {
-    video: {
-      displaySurface: "window",
-    },
-    audio: false,
-  };
-
-  // Set up WebSocket for signaling
-  const signalingServerUrl = "ws://localhost:8080";
-  const signalingSocket = new WebSocket(signalingServerUrl);
-
-  signalingSocket.onmessage = async (message) => {
-    let messageData;
-
-    // If the data is a Blob, convert it to text
-    if (message.data instanceof Blob) {
-      messageData = await message.data.text();
-    } else {
-      messageData = message.data;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC Screen Sharing</title>
+  <style>
+    /* Simple styling to place videos side by side */
+    .videos {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 20px;
     }
-
-    try {
-      const data = JSON.parse(messageData);
-
-      switch (data.type) {
-        case "offer":
-          handleOffer(data.offer);
-          break;
-        case "answer":
-          handleAnswer(data.answer);
-          break;
-        case "ice-candidate":
-          handleIceCandidate(data.candidate);
-          break;
-        default:
-          console.error("Unknown message type:", data.type);
+    video {
+      width: 45%;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <p>
+    This example shows you the contents of the selected part of your display.
+    Click the Start Capture button to begin.
+  </p>
+  
+  <p>
+    <button id="start">Start Capture</button>&nbsp;<button id="stop">
+      Stop Capture
+    </button>
+  </p>
+  
+  <div class="videos">
+    <div>
+      <strong>Local Stream:</strong>
+      <video id="localVideo" autoplay playsinline></video>
+    </div>
+    <div>
+      <strong>Remote Stream:</strong>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+  </div>
+  
+  <br />
+  
+  <strong>Log:</strong>
+  <br />
+  <pre id="log"></pre>
+  
+  <script>
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const logElem = document.getElementById("log");
+    const startElem = document.getElementById("start");
+    const stopElem = document.getElementById("stop");
+  
+    let localStream;
+    let peerConnection;
+    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  
+    const displayMediaOptions = {
+      video: {
+        displaySurface: "window",
+      },
+      audio: false,
+    };
+  
+    // Set up WebSocket for signaling
+    const signalingServerUrl = "ws://localhost:8080";
+    const signalingSocket = new WebSocket(signalingServerUrl);
+  
+    signalingSocket.onmessage = async (event) => {
+      let messageData;
+  
+      // If the data is a Blob, convert it to text
+      if (event.data instanceof Blob) {
+        messageData = await event.data.text();
+      } else {
+        messageData = event.data;
       }
-    } catch (err) {
-      console.error("Failed to parse message:", err, messageData);
-    }
-  };
-
-  startElem.addEventListener(
-    "click",
-    () => {
+  
+      try {
+        const data = JSON.parse(messageData);
+  
+        switch (data.type) {
+          case "offer":
+            handleOffer(data.offer);
+            break;
+          case "answer":
+            handleAnswer(data.answer);
+            break;
+          case "ice-candidate":
+            handleIceCandidate(data.candidate);
+            break;
+          default:
+            console.error("Unknown message type:", data.type);
+        }
+      } catch (err) {
+        console.error("Failed to parse message:", err, messageData);
+      }
+    };
+  
+    startElem.addEventListener("click", () => {
       startCapture();
-    },
-    false
-  );
-
-  stopElem.addEventListener(
-    "click",
-    () => {
+    }, false);
+  
+    stopElem.addEventListener("click", () => {
       stopCapture();
-    },
-    false
-  );
-
-  console.log = (msg) => (logElem.textContent += `${msg}\n`);
-  console.error = (msg) => (logElem.textContent += `Error: ${msg}\n`);
-
-  async function startCapture() {
-    logElem.textContent = "";
-
-    try {
-      localStream = await navigator.mediaDevices.getDisplayMedia(
-        displayMediaOptions
-      );
-      videoElem.srcObject = localStream;
-      setupWebRTC();
-      dumpOptionsInfo();
-    } catch (err) {
-      console.error(err);
+    }, false);
+  
+    // Override console.log and console.error to display in the log element
+    console.log = (msg) => { 
+      logElem.textContent += `${msg}\n`; 
+      console.info(msg); // Also log to the browser console
+    };
+    console.error = (msg) => { 
+      logElem.textContent += `Error: ${msg}\n`; 
+      console.error(msg); // Also log to the browser console
+    };
+  
+    async function startCapture() {
+      logElem.textContent = "";
+  
+      try {
+        localStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+        localVideo.srcObject = localStream;
+        setupWebRTC();
+        dumpOptionsInfo();
+      } catch (err) {
+        console.error(err);
+      }
     }
-  }
-
-  function stopCapture() {
-    let tracks = videoElem.srcObject.getTracks();
-    tracks.forEach((track) => track.stop());
-    videoElem.srcObject = null;
-    if (peerConnection) {
-      peerConnection.close();
-      peerConnection = null;
+  
+    function stopCapture() {
+      if (localVideo.srcObject) {
+        let tracks = localVideo.srcObject.getTracks();
+        tracks.forEach((track) => track.stop());
+        localVideo.srcObject = null;
+      }
+      if (remoteVideo.srcObject) {
+        let tracks = remoteVideo.srcObject.getTracks();
+        tracks.forEach((track) => track.stop());
+        remoteVideo.srcObject = null;
+      }
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
     }
-  }
-
-  function dumpOptionsInfo() {
-    const videoTrack = videoElem.srcObject.getVideoTracks()[0];
-
-    console.log("Track settings:");
-    console.log(JSON.stringify(videoTrack.getSettings(), null, 2));
-    console.log("Track constraints:");
-    console.log(JSON.stringify(videoTrack.getConstraints(), null, 2));
-  }
-
-  function setupWebRTC() {
-    peerConnection = new RTCPeerConnection(config);
-
-    localStream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, localStream);
-    });
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        signalingSocket.send(
-          JSON.stringify({
+  
+    function dumpOptionsInfo() {
+      if (!localVideo.srcObject) return;
+      const videoTrack = localVideo.srcObject.getVideoTracks()[0];
+  
+      console.log("Track settings:");
+      console.log(JSON.stringify(videoTrack.getSettings(), null, 2));
+      console.log("Track constraints:");
+      console.log(JSON.stringify(videoTrack.getConstraints(), null, 2));
+    }
+  
+    function setupWebRTC() {
+      peerConnection = new RTCPeerConnection(config);
+  
+      // Add the local stream tracks to the peer connection
+      localStream.getTracks().forEach((track) => {
+        peerConnection.addTrack(track, localStream);
+      });
+  
+      // Handle ICE candidates
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          signalingSocket.send(JSON.stringify({
             type: "ice-candidate",
-            candidate: event.candidate,
-          })
-        );
-      }
-    };
-
-    peerConnection.oniceconnectionstatechange = () => {
-      console.log("ICE state: " + peerConnection.iceConnectionState);
-    };
-
-    peerConnection.ontrack = (event) => {
-      if (videoElem.srcObject !== event.streams[0]) {
-        console.log("Received remote stream");
-        videoElem.srcObject = event.streams[0];
-      }
-    };
-
-    peerConnection
-      .createOffer()
-      .then((offer) => {
-        return peerConnection.setLocalDescription(offer);
-      })
-      .then(() => {
-        signalingSocket.send(
-          JSON.stringify({
+            candidate: event.candidate
+          }));
+        }
+      };
+  
+      // Handle connection state changes
+      peerConnection.oniceconnectionstatechange = () => {
+        console.log("ICE state: " + peerConnection.iceConnectionState);
+      };
+  
+      // Handle receiving tracks from the remote peer
+      peerConnection.ontrack = (event) => {
+        // event.streams is an array of MediaStream objects
+        if (event.streams && event.streams[0]) {
+          console.log("Received remote stream");
+          remoteVideo.srcObject = event.streams[0];
+        }
+      };
+  
+      // Create and send an offer to the remote peer
+      peerConnection.createOffer()
+        .then((offer) => {
+          return peerConnection.setLocalDescription(offer);
+        })
+        .then(() => {
+          signalingSocket.send(JSON.stringify({
             type: "offer",
-            offer: peerConnection.localDescription,
-          })
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to create offer: " + error);
-      });
-  }
-
-  function handleOffer(offer) {
-    alert("handleOffer");
-    peerConnection = new RTCPeerConnection(config);
-    peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        signalingSocket.send(
-          JSON.stringify({
-            type: "ice-candidate",
-            candidate: event.candidate,
-          })
-        );
+            offer: peerConnection.localDescription
+          }));
+        })
+        .catch((error) => {
+          console.error("Failed to create offer: " + error);
+        });
+    }
+  
+    function handleOffer(offer) {
+      if (!peerConnection) {
+        setupPeerConnection();
       }
-    };
-
-    peerConnection.ontrack = (event) => {
-      if (videoElem.srcObject !== event.streams[0]) {
-        console.log("Received remote stream");
-        videoElem.srcObject = event.streams[0];
-      }
-    };
-
-    peerConnection
-      .createAnswer()
-      .then((answer) => {
-        return peerConnection.setLocalDescription(answer);
-      })
-      .then(() => {
-        signalingSocket.send(
-          JSON.stringify({
+  
+      peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        .then(() => {
+          return peerConnection.createAnswer();
+        })
+        .then((answer) => {
+          return peerConnection.setLocalDescription(answer);
+        })
+        .then(() => {
+          signalingSocket.send(JSON.stringify({
             type: "answer",
-            answer: peerConnection.localDescription,
-          })
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to create answer: " + error);
-      });
-  }
-
-  function handleAnswer(answer) {
-    alert("handleAnswer");
-    peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-  }
-
-  function handleIceCandidate(candidate) {
-    alert("handleIceCandidate");
-    peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-  }
-</script>
+            answer: peerConnection.localDescription
+          }));
+        })
+        .catch((error) => {
+          console.error("Failed to handle offer: " + error);
+        });
+    }
+  
+    function handleAnswer(answer) {
+      if (!peerConnection) {
+        console.error("PeerConnection not established.");
+        return;
+      }
+  
+      peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+        .catch((error) => {
+          console.error("Failed to set remote description: " + error);
+        });
+    }
+  
+    function handleIceCandidate(candidate) {
+      if (!peerConnection) {
+        console.error("PeerConnection not established.");
+        return;
+      }
+  
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+        .catch((error) => {
+          console.error("Failed to add ICE candidate: " + error);
+        });
+    }
+  
+    function setupPeerConnection() {
+      peerConnection = new RTCPeerConnection(config);
+  
+      // Add local stream tracks
+      if (localStream) {
+        localStream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, localStream);
+        });
+      }
+  
+      // Handle ICE candidates
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          signalingSocket.send(JSON.stringify({
+            type: "ice-candidate",
+            candidate: event.candidate
+          }));
+        }
+      };
+  
+      // Handle connection state changes
+      peerConnection.oniceconnectionstatechange = () => {
+        console.log("ICE state: " + peerConnection.iceConnectionState);
+      };
+  
+      // Handle receiving tracks from the remote peer
+      peerConnection.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          console.log("Received remote stream");
+          remoteVideo.srcObject = event.streams[0];
+        }
+      };
+    }
+  </script>
+  
+</body>
+</html>
